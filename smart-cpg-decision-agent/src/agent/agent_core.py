@@ -1,5 +1,5 @@
-from langchain.agents import create_tool_calling_agent, AgentExecutor
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.agents import create_react_agent, AgentExecutor
+from langchain_core.prompts import PromptTemplate
 from langchain.tools import Tool
 from typing import List
 import pandas as pd
@@ -92,21 +92,48 @@ Always summarize findings clearly and concisely.
 If simulating a scenario, provide a brief interpretation of financial impact."""
 
     # -------------------------
-    # Build Prompt (Required in v0.1+)
+    # Build Prompt (ReAct format, widely supported)
     # -------------------------
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_message),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
-        ]
-    )
+    template = '''{system_message}
+
+TOOLS:
+------
+
+You have access to the following tools:
+
+{tools}
+
+To use a tool, please use the following format:
+
+```
+Thought: Do I need to use a tool? Yes
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+```
+
+When you have a response to say to the Human, or if you do not need to use a tool, you MUST use the format:
+
+```
+Thought: Do I need to use a tool? No
+Final Answer: [your response here]
+```
+
+Begin!
+
+Previous conversation history:
+{chat_history}
+
+New input: {input}
+{agent_scratchpad}'''
+
+    prompt = PromptTemplate.from_template(template)
+    prompt = prompt.partial(system_message=system_message)
 
     # -------------------------
-    # Create Agent (NEW WAY)
+    # Create Agent
     # -------------------------
-    agent = create_tool_calling_agent(
+    agent = create_react_agent(
         llm=llm,
         tools=tools,
         prompt=prompt,
