@@ -60,7 +60,9 @@ def main():
                 break
 
             print("\nThinking...")
-            response = agent.run(query)
+            result = agent.invoke({"input": query})
+            response = result.get("output", "Error: No output generated.")
+
             print("\nAgent Response:")
             print(response)
             print("\n" + "-"*50 + "\n")

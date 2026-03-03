@@ -73,8 +73,10 @@ def main():
             with st.chat_message("assistant"):
                 with st.spinner("Agent is thinking and using tools..."):
                     try:
-                        # Run the agent
-                        response = agent.run(prompt)
+                        # Run the agent using invoke (modern LangChain approach)
+                        result = agent.invoke({"input": prompt})
+                        response = result.get("output", "Error: No output generated.")
+
                         st.markdown(response)
                         # Add assistant response to chat history
                         st.session_state.messages.append({"role": "assistant", "content": response})

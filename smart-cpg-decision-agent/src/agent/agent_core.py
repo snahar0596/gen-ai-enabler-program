@@ -1,6 +1,6 @@
-from langchain.agents.agent_types import AgentType
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.tools import Tool
-from langchain.agents.initialize import initialize_agent
 from typing import List
 import pandas as pd
 
@@ -11,44 +11,54 @@ from src.tools.scenario_simulation import simulate_price_change, simulate_promot
 from src.genai.llm_interface import get_llm
 from src.agent.memory import get_memory
 
+
 def create_cpg_agent(df: pd.DataFrame):
     """
     Creates the LangChain Agent loop by binding the tools and the LLM.
     """
+
     llm = get_llm()
     memory = get_memory()
 
-    # Wrap the python functions as LangChain Tools
+    # -------------------------
+    # Wrap Python functions as Tools
+    # -------------------------
     tools = [
         Tool(
             name="CategoryTrends",
             func=lambda period: calculate_category_trends(df, time_period=period).to_string(),
-            description="Use this to get sales and revenue trends over a period (e.g., 'W' for weekly, 'M' for monthly). Input the period string."
+            description="Get sales and revenue trends over a period (e.g., 'W' weekly, 'M' monthly). Input: period string."
         ),
         Tool(
             name="StorePerformance",
             func=lambda metric: compare_stores_performance(df, metric=metric).to_string(),
-            description="Use this to compare overall performance of all stores. Input the metric ('revenue' or 'units_sold')."
+            description="Compare overall store performance. Input: 'revenue' or 'units_sold'."
         ),
         Tool(
             name="SeasonalityAnalysis",
-            func=lambda category: analyze_seasonality(df, category=category if category != 'all' else None).to_string(),
-            description="Use this to identify best selling months for a category. Input the category name or 'all'."
+            func=lambda category: analyze_seasonality(
+                df, category=category if category != "all" else None
+            ).to_string(),
+            description="Identify best-selling months. Input: category name or 'all'."
         ),
         Tool(
             name="SalesSpikes",
-            func=lambda threshold: detect_sales_spikes(df, threshold=float(threshold)).to_string(),
-            description="Use this to find abnormal sales spikes. Input the threshold multiplier (e.g., 2.0)."
+            func=lambda threshold: detect_sales_spikes(
+                df, threshold=float(threshold)
+            ).to_string(),
+            description="Find abnormal sales spikes. Input: threshold multiplier (e.g., 2.0)."
         ),
         Tool(
             name="StockShortages",
-            func=lambda level: detect_stock_shortages(df, critical_level=int(level)).to_string(),
-            description="Use this to find stores with stock below a critical level. Input the inventory level (e.g., 50)."
+            func=lambda level: detect_stock_shortages(
+                df, critical_level=int(level)
+            ).to_string(),
+            description="Find stores with low stock. Input: inventory level (e.g., 50)."
         ),
         Tool(
             name="FailedPromotions",
             func=lambda _: flag_anomalous_promotions(df).to_string(),
-            description="Use this to find promotions that performed worse than average non-promo days. Input is ignored."
+            description="Find promotions that underperformed. Input ignored."
         ),
         Tool(
             name="SimulatePriceChange",
@@ -58,7 +68,7 @@ def create_cpg_agent(df: pd.DataFrame):
                 price_change_pct=float(args.split(",")[1]),
                 elasticity=float(args.split(",")[2]) if len(args.split(",")) > 2 else -1.5
             ),
-            description="Simulate a price change for a SKU. Input a comma-separated string: 'sku_id,price_change_pct,elasticity' (e.g., '101,0.1,-1.5' for a 10% hike on sku 101)."
+            description="Simulate price change. Input: 'sku_id,price_change_pct,elasticity'"
         ),
         Tool(
             name="SimulatePromotion",
@@ -68,31 +78,55 @@ def create_cpg_agent(df: pd.DataFrame):
                 promo_uplift_pct=float(args.split(",")[1]),
                 promo_cost_per_unit=float(args.split(",")[2])
             ),
-            description="Simulate a promotion for a category. Input a comma-separated string: 'category,promo_uplift_pct,promo_cost_per_unit' (e.g., 'Beverages,0.2,1.5' for a 20% uplift with $1.5 cost)."
-        )
+            description="Simulate promotion. Input: 'category,promo_uplift_pct,promo_cost_per_unit'"
+        ),
     ]
 
+    # -------------------------
+    # System Prompt
+    # -------------------------
     system_message = """You are an expert Decision Support Agent for a Consumer Packaged Goods (CPG) company.
 Your goal is to help business heads understand sales data, detect anomalies, and simulate business scenarios to generate actionable strategy memos.
-Use the tools provided to answer the user's questions based on the synthetic data. Always summarize your findings clearly and concisely.
-If simulating a scenario, provide a brief interpretation of the financial impact."""
+Use the tools provided to answer the user's questions based on the synthetic data.
+Always summarize findings clearly and concisely.
+If simulating a scenario, provide a brief interpretation of financial impact."""
 
-    # Initialize the agent
-    agent = initialize_agent(
-        tools=tools,
-        llm=llm,
-        agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
-        verbose=True,
-        memory=memory,
-        agent_kwargs={
-            "system_message": system_message
-        }
+    # -------------------------
+    # Build Prompt (Required in v0.1+)
+    # -------------------------
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_message),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ]
     )
 
-    return agent
+    # -------------------------
+    # Create Agent (NEW WAY)
+    # -------------------------
+    agent = create_tool_calling_agent(
+        llm=llm,
+        tools=tools,
+        prompt=prompt,
+    )
+
+    # -------------------------
+    # Wrap in Executor
+    # -------------------------
+    agent_executor = AgentExecutor(
+        agent=agent,
+        tools=tools,
+        memory=memory,
+        verbose=True,
+    )
+
+    return agent_executor
+
 
 def run_agent(agent, query: str):
     """
     Runs a query through the initialized agent.
     """
-    return agent.run(query)
+    return agent.invoke({"input": query})
